@@ -1,0 +1,15 @@
+<configuration>
+    <conversionRule conversionWord="hl" converterClass="brightspark.pastebotv2.logback.HighlightConverter" />
+
+    <appender name="Console" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%hl(%d [%-5level] [%thread] [%logger{36}] %msg%n)</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="brightspark.pastebotv2" level="debug"/>
+
+    <root level="info">
+        <appender-ref ref="Console"/>
+    </root>
+</configuration>
