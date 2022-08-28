@@ -1,9 +1,11 @@
 plugins {
     id 'org.jetbrains.kotlin.jvm' version '1.7.10'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
 }
 
 group = 'brightspark'
-version = '1.0-SNAPSHOT'
+version = '1.0.0'
 
 repositories {
     mavenCentral()
@@ -26,4 +28,8 @@ dependencies {
 
 compileKotlin {
     kotlinOptions.jvmTarget = '17'
+}
+
+application {
+    mainClass = 'brightspark.pastebotv2.MainKt'
 }
