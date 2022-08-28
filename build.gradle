@@ -33,3 +33,7 @@ compileKotlin {
 application {
     mainClass = 'brightspark.pastebotv2.MainKt'
 }
+
+shadowJar {
+    archiveClassifier.set('')
+}
