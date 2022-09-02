@@ -79,14 +79,13 @@ object PasteExtension : Extension() {
 	private suspend fun EventContext<MessageCreateEvent>.onMessageCreate() {
 		val message = event.message
 		val messageId = message.id.value
-		val attachments = message.attachments
-		LOG.debug { "MessageCreateEvent (Message $messageId): Has attachments -> ${attachments.toLogString()}" }
-
-		val textFiles = attachments.filter { it.isTextFile() }
-		if (textFiles.isEmpty())
+		val textFiles = message.attachments.filter { it.isTextFile() }
+		if (textFiles.isEmpty()) {
 			LOG.debug { "MessageCreateEvent (Message $messageId): No text attachments" }
-		else
-			LOG.info { "MessageCreateEvent (Message $messageId): Has text attachments -> ${textFiles.toLogString()}" }
+			return
+		}
+
+		LOG.info { "MessageCreateEvent (Message $messageId): Has text attachments -> ${textFiles.toLogString()}" }
 
 		kord.launch {
 			message.addReaction(EMOJI)
