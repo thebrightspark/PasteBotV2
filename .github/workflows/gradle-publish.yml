@@ -30,12 +30,8 @@ jobs:
         with:
           arguments: shadowJar
 
-      # The USERNAME and TOKEN need to correspond to the credentials environment variables used in
-      # the publishing section of your build.gradle
-      - name: Publish to GitHub Packages
-        uses: gradle/gradle-build-action@v2
+      - name: Upload release artifact
+        uses: softprops/action-gh-release@v1
         with:
-          arguments: publish
-        env:
-          USERNAME: ${{ github.actor }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ env.GITHUB_REF }}
+          files: build/libs/PasteBitV2-*.jar
