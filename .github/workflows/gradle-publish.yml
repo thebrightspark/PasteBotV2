@@ -34,4 +34,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.GITHUB_REF }}
-          files: build/libs/PasteBitV2-*.jar
+          files: build/libs/PasteBotV2-*.jar
