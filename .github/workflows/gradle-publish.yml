@@ -7,8 +7,7 @@ on:
     types: [ created ]
 
 permissions:
-  contents: read
-  packages: write
+  contents: write
 
 jobs:
   build:
