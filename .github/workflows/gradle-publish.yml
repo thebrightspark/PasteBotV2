@@ -33,5 +33,5 @@ jobs:
       - name: Upload release artifact
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.GITHUB_REF }}
+          tag_name: ${{ env.GITHUB_REF_NAME }}
           files: build/libs/PasteBotV2-*.jar
