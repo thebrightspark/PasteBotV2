@@ -23,8 +23,6 @@ import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
 import dev.kord.rest.builder.message.create.allowedMentions
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.firstOrNull
@@ -43,6 +41,7 @@ object PasteExtension : Extension() {
 	override val name: String = "paste"
 
 	override suspend fun setup() {
+		@Suppress("RemoveExplicitTypeArguments")
 		event<MessageCreateEvent> {
 			check { isNotBot() }
 			check { channelType(ChannelType.GuildText) }
@@ -67,7 +66,11 @@ object PasteExtension : Extension() {
 			check { isNotBot() }
 			check { botHasPermissions(Permission.SendMessages) }
 			check { hasPermission(Permission.SendMessages) }
-			check { failIf(MESSAGE_HAS_NO_ATTACHMENTS) { event.interaction.getTarget().attachments.none { it.isTextFile() } } }
+			check {
+				failIf(MESSAGE_HAS_NO_ATTACHMENTS) {
+					event.interaction.getTarget().attachments.none { FileHelper.isValidFile(it) }
+				}
+			}
 			check { messageHasLock(event.interaction.targetId) }
 			action {
 				LOG.info { "Received message command for message ${event.interaction.targetId}" }
@@ -79,17 +82,22 @@ object PasteExtension : Extension() {
 	private suspend fun EventContext<MessageCreateEvent>.onMessageCreate() {
 		val message = event.message
 		val messageId = message.id.value
-		val textFiles = message.attachments.filter { it.isTextFile() }
+		val logPrefix: String by lazy { "MessageCreateEvent (Message $messageId):" }
+
+		val attachments = message.attachments
+		LOG.debug { "$logPrefix Has attachments -> ${attachments.toLogString()}" }
+
+		val textFiles = attachments.filter { FileHelper.isValidFile(it) }
 		if (textFiles.isEmpty()) {
-			LOG.debug { "MessageCreateEvent (Message $messageId): No text attachments" }
+			LOG.debug { "$logPrefix No text attachments" }
 			return
 		}
 
-		LOG.info { "MessageCreateEvent (Message $messageId): Has text attachments -> ${textFiles.toLogString()}" }
+		LOG.info { "$logPrefix Has text attachments -> ${textFiles.toLogString()}" }
 
 		kord.launch {
 			message.addReaction(EMOJI)
-			LOG.debug { "MessageCreateEvent (Message $messageId): Added reaction" }
+			LOG.debug { "$logPrefix Added reaction" }
 		}
 	}
 
@@ -113,7 +121,7 @@ object PasteExtension : Extension() {
 		// Sanity check attachments
 		val message = messageSupplier()
 		val attachments = message.attachments
-		val textFiles = attachments.filter { it.isTextFile() }
+		val textFiles = attachments.filter { FileHelper.isValidFile(it) }
 		if (textFiles.isEmpty())
 			LOG.debug { "handleMessage (Message $messageIdLong): No text attachments" }
 		else
@@ -126,7 +134,7 @@ object PasteExtension : Extension() {
 					async {
 						LOG.debug { "handleMessage (Message $messageIdLong): Handling file ${it.filename}" }
 						val filename = it.filename
-						val contents = getFileContents(kord, it.url)
+						val contents = FileHelper.getFileContents(kord, it)
 						val pasteUrl = createPaste(kord, filename, contents)
 						return@async filename to pasteUrl
 					}
@@ -151,13 +159,8 @@ object PasteExtension : Extension() {
 		passIf { guildFor(event)?.getMemberOrNull(kord.selfId)?.hasPermissions(*permissions) ?: false }
 	}
 
-	private fun Attachment.isTextFile(): Boolean = !this.isImage && this.contentType?.startsWith("text") == true
-
 	private fun Collection<Attachment>.toLogString(): String =
 		this.joinToString { "'${it.filename}' [${it.contentType}]" }
-
-	private suspend fun getFileContents(kord: Kord, url: String): String =
-		kord.resources.httpClient.get(url).bodyAsText()
 
 	private suspend fun createPaste(kord: Kord, filename: String, contents: String): String =
 		PastebinService.createPaste(kord.resources.httpClient, filename, contents)
