@@ -3,7 +3,6 @@ package brightspark.pastebotv2
 import brightspark.pastebotv2.pastebin.PastebinService
 import com.kotlindiscord.kord.extensions.checks.channelType
 import com.kotlindiscord.kord.extensions.checks.guildFor
-import com.kotlindiscord.kord.extensions.checks.hasPermission
 import com.kotlindiscord.kord.extensions.checks.isNotBot
 import com.kotlindiscord.kord.extensions.checks.types.CheckContext
 import com.kotlindiscord.kord.extensions.events.EventContext
@@ -45,14 +44,14 @@ object PasteExtension : Extension() {
 		event<MessageCreateEvent> {
 			check { isNotBot() }
 			check { channelType(ChannelType.GuildText) }
-			check { hasPermission(Permission.AddReactions) }
-			check { hasPermission(Permission.SendMessages) }
+			check { botHasPermissions(Permission.AddReactions, Permission.SendMessages) }
 			check { failIf { event.message.run { webhookId != null || attachments.isEmpty() } } }
 			action { onMessageCreate() }
 		}
 
 		event<ReactionAddEvent> {
 			check { isNotBot() }
+			check { botHasPermissions(Permission.SendMessages) }
 			check { failIf { event.message.getReactors(EMOJI).firstOrNull { it.id == kord.selfId } == null } }
 			check { messageHasLock(event.messageId) }
 			action {
@@ -65,7 +64,6 @@ object PasteExtension : Extension() {
 			name = "Upload to Pastebin"
 			check { isNotBot() }
 			check { botHasPermissions(Permission.SendMessages) }
-			check { hasPermission(Permission.SendMessages) }
 			check {
 				failIf(MESSAGE_HAS_NO_ATTACHMENTS) {
 					event.interaction.getTarget().attachments.none { FileHelper.isValidFile(it) }
