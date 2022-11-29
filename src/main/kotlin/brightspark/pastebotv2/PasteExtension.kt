@@ -43,7 +43,6 @@ object PasteExtension : Extension() {
 		@Suppress("RemoveExplicitTypeArguments")
 		event<MessageCreateEvent> {
 			check { isNotBot() }
-			check { channelType(ChannelType.GuildText) }
 			check { botHasPermissions(Permission.AddReactions, Permission.SendMessages) }
 			check { failIf { event.message.run { webhookId != null || attachments.isEmpty() } } }
 			action { onMessageCreate() }
