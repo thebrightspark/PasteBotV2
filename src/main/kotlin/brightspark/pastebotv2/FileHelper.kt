@@ -9,10 +9,14 @@ import java.util.zip.GZIPInputStream
 object FileHelper {
 	private const val FILE_SIZE_LIMIT = 500_000 // 0.5MB
 	private const val MIME_TEXT = "text/"
+	private const val MIME_JSON = "application/json"
 	private const val FILE_EXT_GZIP = ".gz"
 
 	fun isValidFile(attachment: Attachment): Boolean =
-		!attachment.isImage && attachment.size <= FILE_SIZE_LIMIT && attachment.contentType?.startsWith(MIME_TEXT) ?: false
+		!attachment.isImage && attachment.size <= FILE_SIZE_LIMIT && attachment.contentType?.let { isValidContentType(it) } ?: false
+
+	private fun isValidContentType(contentType: String): Boolean =
+		contentType.startsWith(MIME_TEXT) || contentType == MIME_JSON
 
 	suspend fun getFileContents(kord: Kord, attachment: Attachment): String {
 		val filename = attachment.filename
