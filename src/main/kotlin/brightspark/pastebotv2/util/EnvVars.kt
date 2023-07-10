@@ -1,4 +1,4 @@
-package brightspark.pastebotv2
+package brightspark.pastebotv2.util
 
 object EnvVars {
 	private const val PREFIX = "PASTEBOTV2_"

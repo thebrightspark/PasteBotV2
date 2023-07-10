@@ -1,5 +1,8 @@
 package brightspark.pastebotv2
 
+import brightspark.pastebotv2.extension.GeneralExtension
+import brightspark.pastebotv2.extension.PasteExtension
+import brightspark.pastebotv2.util.EnvVars
 import com.kotlindiscord.kord.extensions.ExtensibleBot
 import dev.kord.gateway.Intent
 import dev.kord.gateway.PrivilegedIntent

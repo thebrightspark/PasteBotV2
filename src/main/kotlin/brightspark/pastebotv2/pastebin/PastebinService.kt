@@ -1,6 +1,6 @@
 package brightspark.pastebotv2.pastebin
 
-import brightspark.pastebotv2.EnvVars
+import brightspark.pastebotv2.util.EnvVars
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*

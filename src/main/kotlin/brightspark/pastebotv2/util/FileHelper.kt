@@ -1,4 +1,4 @@
-package brightspark.pastebotv2
+package brightspark.pastebotv2.util
 
 import dev.kord.core.Kord
 import dev.kord.core.entity.Attachment

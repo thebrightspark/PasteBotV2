@@ -1,4 +1,4 @@
-package brightspark.pastebotv2
+package brightspark.pastebotv2.extension
 
 import com.kotlindiscord.kord.extensions.checks.types.CheckContext
 import com.kotlindiscord.kord.extensions.extensions.Extension

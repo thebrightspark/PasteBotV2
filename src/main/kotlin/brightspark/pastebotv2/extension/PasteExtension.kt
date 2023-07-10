@@ -1,6 +1,7 @@
-package brightspark.pastebotv2
+package brightspark.pastebotv2.extension
 
 import brightspark.pastebotv2.pastebin.PastebinService
+import brightspark.pastebotv2.util.FileHelper
 import com.kotlindiscord.kord.extensions.checks.guildFor
 import com.kotlindiscord.kord.extensions.checks.isNotBot
 import com.kotlindiscord.kord.extensions.checks.types.CheckContext
