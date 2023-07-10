@@ -12,38 +12,26 @@ object FileHelper {
 	private const val MIME_JSON = "application/json"
 	private const val FILE_EXT_GZIP = ".gz"
 
-	fun isValidFile(attachment: Attachment): Boolean =
-		!attachment.isImage && attachment.size <= FILE_SIZE_LIMIT && attachment.contentType?.let { isValidContentType(it) } ?: false
+	fun isValidFile(attachment: Attachment): Boolean = isValidContentType(attachment) && isValidSize(attachment)
 
-	private fun isValidContentType(contentType: String): Boolean =
-		contentType.startsWith(MIME_TEXT) || contentType == MIME_JSON
+	fun isValidContentType(attachment: Attachment): Boolean =
+		!attachment.isImage && attachment.contentType?.let { it.startsWith(MIME_TEXT) || it == MIME_JSON } ?: false
 
-	suspend fun getFileContents(kord: Kord, attachment: Attachment): String {
+	fun isValidSize(attachment: Attachment): Boolean = attachment.size <= FILE_SIZE_LIMIT
+
+	suspend fun getFileContents(kord: Kord, attachment: Attachment): String =
+		String(getFileContentsBytes(kord, attachment))
+
+	suspend fun getFileContentsBytes(kord: Kord, attachment: Attachment): ByteArray {
 		val filename = attachment.filename
-		val mimeType = attachment.contentType!!
-
-		if (!isValidFile(attachment))
-			error("Invalid file type $filename ('$mimeType')")
-
 		val url = attachment.url
-		var contentsBytes = getFileContents<ByteArray>(kord, url)
+		var contentsBytes: ByteArray = kord.resources.httpClient.get(url).body()
 		if (filename.endsWith(FILE_EXT_GZIP)) {
-			contentsBytes = decompressGzip(contentsBytes)
-
-			val bytes = contentsBytes.size
-			if (bytes > FILE_SIZE_LIMIT)
-				return "Decompressed file too large! (${bytesToMegabytesText(bytes)} MB)"
+			contentsBytes = GZIPInputStream(contentsBytes.inputStream()).use { it.readAllBytes() }
 		}
-
-		return String(contentsBytes)
+		return contentsBytes
 	}
 
-	private suspend inline fun <reified T> getFileContents(kord: Kord, url: String): T =
-		kord.resources.httpClient.get(url).body()
-
-	private fun decompressGzip(compressedContents: ByteArray): ByteArray =
-		GZIPInputStream(compressedContents.inputStream()).use { it.readAllBytes() }
-
-	private fun bytesToMegabytesText(bytes: Int): String =
+	fun bytesToMegabytesText(bytes: Int): String =
 		String.format("%.1f", bytes.toFloat() / 1_000_000f)
 }

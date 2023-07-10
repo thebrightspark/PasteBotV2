@@ -9,7 +9,7 @@ class PastebinFormat private constructor(
 		private fun create(format: String, name: String, vararg extensions: String): PastebinFormat =
 			PastebinFormat(format, name, extensions)
 
-		val FORMATS: List<PastebinFormat> = listOf(
+		private val FORMATS: List<PastebinFormat> = listOf(
 			create("bash", "Bash", "sh"),
 			create("dos", "Batch", "bat"),
 			create("c", "C", "c"),
