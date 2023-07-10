@@ -43,7 +43,7 @@ object GeneralExtension : Extension() {
 			check { isLogInfoEnabled() }
 			action {
 				val guildString = event.guild.toLogString()
-				LOG.info { "GuildDeleteEvent: Disconnected from ${event.unavailable.unavailableString()} guild $guildString" }
+				LOG.info { "GuildDeleteEvent: Disconnected from ${event.unavailable.unavailableString()}guild $guildString" }
 			}
 		}
 	}
@@ -52,7 +52,7 @@ object GeneralExtension : Extension() {
 		passIf { LOG.isInfoEnabled }
 	}
 
-	private fun Boolean.unavailableString(): String = if (this) "unavailable" else ""
+	private fun Boolean.unavailableString(): String = if (this) "unavailable " else ""
 
 	private suspend fun Guild?.toLogString(): String =
 		this?.let { guild -> "${guild.name} [${guild.id}] (Owner: ${guild.owner.asUser().toLogString()})" } ?: "<null>"
