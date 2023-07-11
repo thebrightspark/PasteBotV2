@@ -5,12 +5,16 @@ import brightspark.pastebotv2.util.FileHelper
 import com.kotlindiscord.kord.extensions.checks.guildFor
 import com.kotlindiscord.kord.extensions.checks.isNotBot
 import com.kotlindiscord.kord.extensions.checks.types.CheckContext
+import com.kotlindiscord.kord.extensions.commands.application.message.PublicMessageCommandContext
 import com.kotlindiscord.kord.extensions.components.components
 import com.kotlindiscord.kord.extensions.components.ephemeralButton
+import com.kotlindiscord.kord.extensions.components.forms.ModalForm
 import com.kotlindiscord.kord.extensions.events.EventContext
 import com.kotlindiscord.kord.extensions.extensions.Extension
 import com.kotlindiscord.kord.extensions.extensions.event
 import com.kotlindiscord.kord.extensions.extensions.publicMessageCommand
+import com.kotlindiscord.kord.extensions.types.respond
+import com.kotlindiscord.kord.extensions.utils.getJumpUrl
 import com.kotlindiscord.kord.extensions.utils.hasPermissions
 import dev.kord.common.entity.ButtonStyle
 import dev.kord.common.entity.Permission
@@ -20,10 +24,10 @@ import dev.kord.core.behavior.MessageBehavior
 import dev.kord.core.behavior.edit
 import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Attachment
-import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
+import dev.kord.rest.builder.message.create.MessageCreateBuilder
 import dev.kord.rest.builder.message.create.allowedMentions
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -55,10 +59,7 @@ object PasteExtension : Extension() {
 			check { botHasPermissions(Permission.SendMessages) }
 			check { failIf { event.message.getReactors(EMOJI).firstOrNull { it.id == kord.selfId } == null } }
 			check { messageHasLock(event.messageId) }
-			action {
-				LOG.info { "Received reaction for message ${event.messageId}" }
-				handleMessage(event.message) { event.getMessage() }
-			}
+			action { handleReactionAddEvent() }
 		}
 
 		publicMessageCommand {
@@ -66,10 +67,7 @@ object PasteExtension : Extension() {
 			check { isNotBot() }
 			check { botHasPermissions(Permission.SendMessages) }
 			check { messageHasLock(event.interaction.targetId) }
-			action {
-				LOG.info { "Received message command for message ${event.interaction.targetId}" }
-				handleMessage(event.interaction.target) { event.interaction.getTarget() }
-			}
+			action { handleMessageCommand() }
 		}
 	}
 
@@ -95,10 +93,14 @@ object PasteExtension : Extension() {
 		}
 	}
 
-	private suspend fun handleMessage(messageBehaviour: MessageBehavior, messageSupplier: suspend () -> Message) {
-		// If message is currently being handled, don't do anything
+	private suspend fun EventContext<ReactionAddEvent>.handleReactionAddEvent() {
+		LOG.info { "Received reaction for message ${event.messageId}" }
+
+		val messageBehaviour = event.message
 		val messageIdLong = messageBehaviour.id.value
-		if (!MESSAGE_LOCKS.add(messageIdLong)) {
+
+		// If message is currently being handled, don't do anything
+		if (!tryLockMessage(messageIdLong)) {
 			messageBehaviour.reply {
 				allowedMentions { repliedUser = true }
 				content = MESSAGE_HAS_LOCK
@@ -106,26 +108,10 @@ object PasteExtension : Extension() {
 			return
 		}
 
-		// If the message has the reaction, remove it so that we don't try to create a paste again for the same message
-		kord.launch {
-			messageBehaviour.deleteOwnReaction(EMOJI)
-			LOG.debug { "handleMessage (Message $messageIdLong): Removed reaction" }
-		}
+		removeBotReaction(messageBehaviour)
 
-		// Sanity check attachments
-		val attachments = messageSupplier().attachments
-		val attachmentsWithinSizeLimit = attachments.filter { FileHelper.isValidSize(it) }
-		val textFiles = attachmentsWithinSizeLimit.filter { FileHelper.isValidContentType(it) }
-		if (LOG.isDebugEnabled) {
-			if (attachmentsWithinSizeLimit.isNotEmpty())
-				LOG.debug { "handleMessage (Message $messageIdLong): Attachments -> ${attachmentsWithinSizeLimit.toLogString()}" }
-		} else {
-			if (textFiles.isEmpty())
-				LOG.debug { "handleMessage (Message $messageIdLong): No text attachments" }
-			else
-				LOG.info { "handleMessage (Message $messageIdLong): Has text attachments -> ${textFiles.toLogString()}" }
-		}
-
+		val attachments = getAttachments(messageBehaviour)
+		val attachmentsWithinSizeLimit = attachments.first
 		if (attachmentsWithinSizeLimit.isEmpty()) {
 			// No files within size limit!
 			messageBehaviour.reply {
@@ -134,10 +120,13 @@ object PasteExtension : Extension() {
 			}
 			return
 		}
+		val textFiles = attachments.second
 
 		if (textFiles.size < attachmentsWithinSizeLimit.size) {
 			// If any attachments have invalid content types, ask user if they want to force upload
-			handleAskUpload(messageBehaviour, messageIdLong, attachmentsWithinSizeLimit, textFiles)
+			messageBehaviour.reply {
+				createAskUploadMessage(messageIdLong, null, attachmentsWithinSizeLimit, textFiles)
+			}
 		} else {
 			handleUpload(messageIdLong, textFiles) {
 				messageBehaviour.reply {
@@ -148,9 +137,78 @@ object PasteExtension : Extension() {
 		}
 	}
 
-	private suspend fun handleAskUpload(
-		messageBehaviour: MessageBehavior,
+	private suspend fun PublicMessageCommandContext<ModalForm>.handleMessageCommand() {
+		LOG.info { "Received message command for message ${event.interaction.targetId}" }
+
+		val messageBehaviour = event.interaction.target
+		val messageIdLong = messageBehaviour.id.value
+		val jumpText = "[Link To Message](${messageBehaviour.asMessage().getJumpUrl()})"
+
+		// If message is currently being handled, don't do anything
+		if (!tryLockMessage(messageIdLong)) {
+			respond {
+				allowedMentions { repliedUser = true }
+				content = "$jumpText\n\n$MESSAGE_HAS_LOCK"
+			}
+			return
+		}
+
+		removeBotReaction(messageBehaviour)
+
+		val attachments = getAttachments(messageBehaviour)
+		val attachmentsWithinSizeLimit = attachments.first
+		if (attachmentsWithinSizeLimit.isEmpty()) {
+			// No files within size limit!
+			respond {
+				allowedMentions { repliedUser = true }
+				content = "$jumpText\n\n$MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT"
+			}
+			return
+		}
+		val textFiles = attachments.second
+
+		if (textFiles.size < attachmentsWithinSizeLimit.size) {
+			// If any attachments have invalid content types, ask user if they want to force upload
+			respond { createAskUploadMessage(messageIdLong, jumpText, attachmentsWithinSizeLimit, textFiles) }
+		} else {
+			handleUpload(messageIdLong, textFiles) {
+				respond {
+					allowedMentions { repliedUser = true }
+					content = "$jumpText\n\n$it"
+				}
+			}
+		}
+	}
+
+	private fun tryLockMessage(messageId: ULong): Boolean = MESSAGE_LOCKS.add(messageId)
+
+	private fun removeBotReaction(message: MessageBehavior) {
+		kord.launch {
+			message.deleteOwnReaction(EMOJI)
+			LOG.debug { "removeBotReaction (Message ${message.id}): Removed reaction" }
+		}
+	}
+
+	private suspend fun getAttachments(messageBehaviour: MessageBehavior): Pair<List<Attachment>, List<Attachment>> {
+		val messageId = messageBehaviour.id.value
+		val attachments = messageBehaviour.asMessage().attachments
+		val attachmentsWithinSizeLimit = attachments.filter { FileHelper.isValidSize(it) }
+		val textFiles = attachmentsWithinSizeLimit.filter { FileHelper.isValidContentType(it) }
+		if (LOG.isDebugEnabled) {
+			if (attachmentsWithinSizeLimit.isNotEmpty())
+				LOG.debug { "handleMessage (Message $messageId): Attachments -> ${attachmentsWithinSizeLimit.toLogString()}" }
+		} else {
+			if (textFiles.isEmpty())
+				LOG.debug { "handleMessage (Message $messageId): No text attachments" }
+			else
+				LOG.info { "handleMessage (Message $messageId): Has text attachments -> ${textFiles.toLogString()}" }
+		}
+		return attachmentsWithinSizeLimit to textFiles
+	}
+
+	private suspend inline fun MessageCreateBuilder.createAskUploadMessage(
 		messageIdLong: ULong,
+		jumpText: String?,
 		attachmentsWithinSizeLimit: List<Attachment>,
 		textFiles: List<Attachment>
 	) {
@@ -159,45 +217,45 @@ object PasteExtension : Extension() {
 			.filter { !textFiles.contains(it) }
 			.joinToString("\n") { "- `${it.filename}`" }
 
-		messageBehaviour.reply {
-			content = """
+		content = """
+				${jumpText ?: ""}
+				
 				The following files are valid to upload:
 				$validFiles
 				However the following seem invalid:
 				$invalidFiles
 				
 				Would you like to upload the invalid files too regardless?
-			""".trimIndent()
-			components {
-				ephemeralButton {
-					label = "Yes"
-					style = ButtonStyle.Success
-					action {
-						handleUpload(messageIdLong, attachmentsWithinSizeLimit) {
-							this.message.edit {
-								content = it
-								components { /* None */ }
-							}
+			""".trimIndent().trim()
+		components {
+			ephemeralButton {
+				label = "Yes"
+				style = ButtonStyle.Success
+				action {
+					handleUpload(messageIdLong, attachmentsWithinSizeLimit) {
+						this.message.edit {
+							content = "$jumpText\n\n$it"
+							components { /* None */ }
 						}
 					}
 				}
-				ephemeralButton {
-					label = "No"
-					style = ButtonStyle.Danger
-					action {
-						if (textFiles.isNotEmpty()) {
-							handleUpload(messageIdLong, textFiles) {
-								this.message.edit {
-									content = it
-									components { /* None */ }
-								}
-							}
-						} else {
-							MESSAGE_LOCKS.remove(messageIdLong)
+			}
+			ephemeralButton {
+				label = "No"
+				style = ButtonStyle.Danger
+				action {
+					if (textFiles.isNotEmpty()) {
+						handleUpload(messageIdLong, textFiles) {
 							this.message.edit {
-								content = "Nothing to upload"
+								content = "$jumpText\n\n$it"
 								components { /* None */ }
 							}
+						}
+					} else {
+						MESSAGE_LOCKS.remove(messageIdLong)
+						this.message.edit {
+							content = "$jumpText\n\nNothing to upload"
+							components { /* None */ }
 						}
 					}
 				}
@@ -215,7 +273,7 @@ object PasteExtension : Extension() {
 			val pastesMessage = textFiles
 				.map {
 					async {
-						LOG.debug { "handleMessage (Message $messageId): Handling file ${it.filename}" }
+						LOG.debug { "handleUpload (Message $messageId): Handling upload ${it.filename}" }
 						val filename = it.filename
 						val contents = FileHelper.getFileContents(kord, it)
 						val pasteUrl = createPaste(kord, filename, contents)
@@ -227,7 +285,7 @@ object PasteExtension : Extension() {
 
 			pastesMessageConsumer(pastesMessage)
 			MESSAGE_LOCKS.remove(messageId)
-			LOG.debug { "handleMessage (Message $messageId): Replied to message:\n$pastesMessage" }
+			LOG.debug { "handleUpload (Message $messageId): Replied to message:\n$pastesMessage" }
 		}
 	}
 
