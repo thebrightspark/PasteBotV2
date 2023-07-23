@@ -9,8 +9,6 @@ import kotlinx.serialization.Serializable
 // https://api.mclo.gs/
 object MclogsService : PasteSiteService(10_000_000) {
 	private const val API_URL = "https://api.mclo.gs/1/log"
-	private const val RAW_PASTE_URL = "https://api.mclo.gs/1/raw/"
-	private val PASTE_URL_REGEX = Regex("https://mclo\\.gs/(\\w+)")
 
 	override suspend fun create(filename: String, contents: String): String {
 		logStart(filename, contents)
@@ -28,9 +26,6 @@ object MclogsService : PasteSiteService(10_000_000) {
 			}
 		}
 	}
-
-	fun getUrlsAsRawUrls(text: String): List<String> =
-		PASTE_URL_REGEX.findAll(text).map { RAW_PASTE_URL + it.groups[1]!!.value }.toList()
 
 	@Serializable
 	data class Result(

@@ -1,7 +1,6 @@
 package brightspark.pastebotv2.extension
 
 import brightspark.pastebotv2.pastesite.PasteSite
-import brightspark.pastebotv2.pastesite.mclogs.MclogsService
 import brightspark.pastebotv2.util.FileHelper
 import com.kotlindiscord.kord.extensions.checks.guildFor
 import com.kotlindiscord.kord.extensions.checks.isNotBot
@@ -29,7 +28,6 @@ import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
 import dev.kord.rest.builder.message.create.MessageCreateBuilder
-import dev.kord.rest.builder.message.create.allowedMentions
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.firstOrNull
@@ -79,7 +77,6 @@ object PasteExtension : Extension() {
 		val logPrefix: String by lazy { "MessageCreateEvent (Message $messageId):" }
 
 		addReactionToMessageWithTextFiles(message, logPrefix)
-		replyMclogsRawUrl(message, logPrefix)
 	}
 
 	private fun addReactionToMessageWithTextFiles(message: Message, logPrefix: String) {
@@ -99,20 +96,6 @@ object PasteExtension : Extension() {
 		kord.launch {
 			message.addReaction(EMOJI)
 			LOG.debug { "$logPrefix Added reaction" }
-		}
-	}
-
-	private fun replyMclogsRawUrl(message: Message, logPrefix: String) {
-		kord.launch {
-			val urls = MclogsService.getUrlsAsRawUrls(message.content)
-			if (urls.isNotEmpty()) {
-				val rawUrlsMessage = "Raw URLs:\n${urls.joinToString("\n") { "- $it" }}"
-				message.reply {
-					allowedMentions() // No pings
-					content = rawUrlsMessage
-				}
-				LOG.debug { "$logPrefix Replied to message:\n$rawUrlsMessage" }
-			}
 		}
 	}
 
