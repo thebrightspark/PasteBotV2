@@ -7,17 +7,12 @@ import io.ktor.client.request.*
 import java.util.zip.GZIPInputStream
 
 object FileHelper {
-	private const val FILE_SIZE_LIMIT = 500_000 // 0.5MB
 	private const val MIME_TEXT = "text/"
 	private const val MIME_JSON = "application/json"
 	private const val FILE_EXT_GZIP = ".gz"
 
-	fun isValidFile(attachment: Attachment): Boolean = isValidContentType(attachment) && isValidSize(attachment)
-
 	fun isValidContentType(attachment: Attachment): Boolean =
 		!attachment.isImage && attachment.contentType?.let { it.startsWith(MIME_TEXT) || it == MIME_JSON } ?: false
-
-	fun isValidSize(attachment: Attachment): Boolean = attachment.size <= FILE_SIZE_LIMIT
 
 	suspend fun getFileContents(kord: Kord, attachment: Attachment): String =
 		String(getFileContentsBytes(kord, attachment))
@@ -33,5 +28,5 @@ object FileHelper {
 	}
 
 	fun bytesToMegabytesText(bytes: Int): String =
-		String.format("%.1f", bytes.toFloat() / 1_000_000f)
+		String.format("%.1f", bytes.toFloat() / 1_000_000f).replace(Regex("\\.0$"), "")
 }

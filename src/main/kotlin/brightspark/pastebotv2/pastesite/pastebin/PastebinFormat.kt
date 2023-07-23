@@ -1,4 +1,4 @@
-package brightspark.pastebotv2.pastebin
+package brightspark.pastebotv2.pastesite.pastebin
 
 class PastebinFormat private constructor(
 	val format: String,

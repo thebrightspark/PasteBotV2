@@ -1,6 +1,7 @@
 package brightspark.pastebotv2.extension
 
-import brightspark.pastebotv2.pastebin.PastebinService
+import brightspark.pastebotv2.pastesite.PasteSite
+import brightspark.pastebotv2.pastesite.mclogs.MclogsService
 import brightspark.pastebotv2.util.FileHelper
 import com.kotlindiscord.kord.extensions.checks.guildFor
 import com.kotlindiscord.kord.extensions.checks.isNotBot
@@ -19,11 +20,11 @@ import com.kotlindiscord.kord.extensions.utils.hasPermissions
 import dev.kord.common.entity.ButtonStyle
 import dev.kord.common.entity.Permission
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.Kord
 import dev.kord.core.behavior.MessageBehavior
 import dev.kord.core.behavior.edit
 import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Attachment
+import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
@@ -40,7 +41,7 @@ object PasteExtension : Extension() {
 	private const val MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT = "This message has no file attachments within the size limit!"
 	private const val MESSAGE_HAS_LOCK = "Already creating a paste for this message!"
 
-	private val EMOJI = ReactionEmoji.Unicode("\uD83D\uDDD2️") // https://emojipedia.org/spiral-notepad/
+	val EMOJI = ReactionEmoji.Unicode("\uD83D\uDDD2️") // https://emojipedia.org/spiral-notepad/
 	private val LOG = KotlinLogging.logger {}
 	private val MESSAGE_LOCKS = ConcurrentHashMap.newKeySet<ULong>()
 
@@ -50,7 +51,6 @@ object PasteExtension : Extension() {
 		event<MessageCreateEvent> {
 			check { isNotBot() }
 			check { botHasPermissions(Permission.AddReactions, Permission.SendMessages) }
-			check { failIf { event.message.run { webhookId != null || attachments.isEmpty() } } }
 			action { onMessageCreate() }
 		}
 
@@ -62,24 +62,33 @@ object PasteExtension : Extension() {
 			action { handleReactionAddEvent() }
 		}
 
-		publicMessageCommand {
-			name = "Upload to Pastebin"
-			check { isNotBot() }
-			check { botHasPermissions(Permission.SendMessages) }
-			check { messageHasLock(event.interaction.targetId) }
-			action { handleMessageCommand() }
+		PasteSite.values().forEach { pasteSite ->
+			publicMessageCommand {
+				name = "Upload ${pasteSite.siteName}"
+				check { isNotBot() }
+				check { botHasPermissions(Permission.SendMessages) }
+				check { messageHasLock(event.interaction.targetId) }
+				action { handleMessageCommand(pasteSite) }
+			}
 		}
 	}
 
-	private suspend fun EventContext<MessageCreateEvent>.onMessageCreate() {
+	private fun EventContext<MessageCreateEvent>.onMessageCreate() {
 		val message = event.message
 		val messageId = message.id.value
 		val logPrefix: String by lazy { "MessageCreateEvent (Message $messageId):" }
 
+		addReactionToMessageWithTextFiles(message, logPrefix)
+		replyMclogsRawUrl(message, logPrefix)
+	}
+
+	private fun addReactionToMessageWithTextFiles(message: Message, logPrefix: String) {
+		if (message.webhookId != null || message.attachments.isEmpty()) return
+
 		val attachments = message.attachments
 		LOG.debug { "$logPrefix Has attachments -> ${attachments.toLogString()}" }
 
-		val textFiles = attachments.filter { FileHelper.isValidFile(it) }
+		val textFiles = attachments.filter { FileHelper.isValidContentType(it) }
 		if (textFiles.isEmpty()) {
 			LOG.debug { "$logPrefix No text attachments" }
 			return
@@ -93,31 +102,42 @@ object PasteExtension : Extension() {
 		}
 	}
 
+	private fun replyMclogsRawUrl(message: Message, logPrefix: String) {
+		kord.launch {
+			val urls = MclogsService.getUrlsAsRawUrls(message.content)
+			if (urls.isNotEmpty()) {
+				val rawUrlsMessage = "Raw URLs:\n${urls.joinToString("\n") { "- $it" }}"
+				message.reply {
+					allowedMentions() // No pings
+					content = rawUrlsMessage
+				}
+				LOG.debug { "$logPrefix Replied to message:\n$rawUrlsMessage" }
+			}
+		}
+	}
+
 	private suspend fun EventContext<ReactionAddEvent>.handleReactionAddEvent() {
-		LOG.info { "Received reaction for message ${event.messageId}" }
+		LOG.info { "handleReactionAddEvent: Received reaction for message ${event.messageId}" }
 
 		val messageBehaviour = event.message
 		val messageIdLong = messageBehaviour.id.value
 
 		// If message is currently being handled, don't do anything
 		if (!tryLockMessage(messageIdLong)) {
-			messageBehaviour.reply {
-				allowedMentions { repliedUser = true }
-				content = MESSAGE_HAS_LOCK
-			}
+			messageBehaviour.reply { content = MESSAGE_HAS_LOCK }
 			return
 		}
 
 		removeBotReaction(messageBehaviour)
 
-		val attachments = getAttachments(messageBehaviour)
+		val pasteSite = PasteSite.getPreferred(messageBehaviour.asMessage())
+		LOG.debug { "handleReactionAddEvent: Selected $pasteSite to upload pastes to" }
+
+		val attachments = getAttachments(pasteSite, messageBehaviour)
 		val attachmentsWithinSizeLimit = attachments.first
 		if (attachmentsWithinSizeLimit.isEmpty()) {
 			// No files within size limit!
-			messageBehaviour.reply {
-				allowedMentions { repliedUser = true }
-				content = MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT
-			}
+			messageBehaviour.reply { content = MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT }
 			return
 		}
 		val textFiles = attachments.second
@@ -125,20 +145,17 @@ object PasteExtension : Extension() {
 		if (textFiles.size < attachmentsWithinSizeLimit.size) {
 			// If any attachments have invalid content types, ask user if they want to force upload
 			messageBehaviour.reply {
-				createAskUploadMessage(messageIdLong, null, attachmentsWithinSizeLimit, textFiles)
+				createAskUploadMessage(pasteSite, messageIdLong, null, attachmentsWithinSizeLimit, textFiles)
 			}
 		} else {
-			handleUpload(messageIdLong, textFiles) {
-				messageBehaviour.reply {
-					allowedMentions { repliedUser = true }
-					content = it
-				}
+			handleUpload(pasteSite, messageIdLong, textFiles) {
+				messageBehaviour.reply { content = it }
 			}
 		}
 	}
 
-	private suspend fun PublicMessageCommandContext<ModalForm>.handleMessageCommand() {
-		LOG.info { "Received message command for message ${event.interaction.targetId}" }
+	private suspend fun PublicMessageCommandContext<ModalForm>.handleMessageCommand(pasteSite: PasteSite) {
+		LOG.info { "handleMessageCommand: Received message command for message ${event.interaction.targetId}" }
 
 		val messageBehaviour = event.interaction.target
 		val messageIdLong = messageBehaviour.id.value
@@ -146,36 +163,29 @@ object PasteExtension : Extension() {
 
 		// If message is currently being handled, don't do anything
 		if (!tryLockMessage(messageIdLong)) {
-			respond {
-				allowedMentions { repliedUser = true }
-				content = "$jumpText\n\n$MESSAGE_HAS_LOCK"
-			}
+			respond { content = "$jumpText\n\n$MESSAGE_HAS_LOCK" }
 			return
 		}
 
 		removeBotReaction(messageBehaviour)
 
-		val attachments = getAttachments(messageBehaviour)
+		val attachments = getAttachments(pasteSite, messageBehaviour)
 		val attachmentsWithinSizeLimit = attachments.first
 		if (attachmentsWithinSizeLimit.isEmpty()) {
 			// No files within size limit!
-			respond {
-				allowedMentions { repliedUser = true }
-				content = "$jumpText\n\n$MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT"
-			}
+			respond { content = "$jumpText\n\n$MESSAGE_HAS_NONE_WITHIN_SIZE_LIMIT (Max ${pasteSite.maxSizeMb})" }
 			return
 		}
 		val textFiles = attachments.second
 
 		if (textFiles.size < attachmentsWithinSizeLimit.size) {
 			// If any attachments have invalid content types, ask user if they want to force upload
-			respond { createAskUploadMessage(messageIdLong, jumpText, attachmentsWithinSizeLimit, textFiles) }
+			respond {
+				createAskUploadMessage(pasteSite, messageIdLong, jumpText, attachmentsWithinSizeLimit, textFiles)
+			}
 		} else {
-			handleUpload(messageIdLong, textFiles) {
-				respond {
-					allowedMentions { repliedUser = true }
-					content = "$jumpText\n\n$it"
-				}
+			handleUpload(pasteSite, messageIdLong, textFiles) {
+				respond { content = "$jumpText\n\n$it" }
 			}
 		}
 	}
@@ -189,10 +199,14 @@ object PasteExtension : Extension() {
 		}
 	}
 
-	private suspend fun getAttachments(messageBehaviour: MessageBehavior): Pair<List<Attachment>, List<Attachment>> {
+	private suspend fun getAttachments(
+		pasteSite: PasteSite,
+		messageBehaviour: MessageBehavior
+	): Pair<List<Attachment>, List<Attachment>> {
 		val messageId = messageBehaviour.id.value
+		val pasteSiteService = pasteSite.service
 		val attachments = messageBehaviour.asMessage().attachments
-		val attachmentsWithinSizeLimit = attachments.filter { FileHelper.isValidSize(it) }
+		val attachmentsWithinSizeLimit = attachments.filter { pasteSiteService.validateSize(it) }
 		val textFiles = attachmentsWithinSizeLimit.filter { FileHelper.isValidContentType(it) }
 		if (LOG.isDebugEnabled) {
 			if (attachmentsWithinSizeLimit.isNotEmpty())
@@ -207,6 +221,7 @@ object PasteExtension : Extension() {
 	}
 
 	private suspend inline fun MessageCreateBuilder.createAskUploadMessage(
+		pasteSite: PasteSite,
 		messageIdLong: ULong,
 		jumpText: String?,
 		attachmentsWithinSizeLimit: List<Attachment>,
@@ -232,7 +247,7 @@ object PasteExtension : Extension() {
 				label = "Yes"
 				style = ButtonStyle.Success
 				action {
-					handleUpload(messageIdLong, attachmentsWithinSizeLimit) {
+					handleUpload(pasteSite, messageIdLong, attachmentsWithinSizeLimit) {
 						this.message.edit {
 							content = "$jumpText\n\n$it"
 							components { /* None */ }
@@ -245,7 +260,7 @@ object PasteExtension : Extension() {
 				style = ButtonStyle.Danger
 				action {
 					if (textFiles.isNotEmpty()) {
-						handleUpload(messageIdLong, textFiles) {
+						handleUpload(pasteSite, messageIdLong, textFiles) {
 							this.message.edit {
 								content = "$jumpText\n\n$it"
 								components { /* None */ }
@@ -265,27 +280,35 @@ object PasteExtension : Extension() {
 
 	// Create pastes and reply
 	private suspend fun handleUpload(
+		pasteSite: PasteSite,
 		messageId: ULong,
 		textFiles: List<Attachment>,
 		pastesMessageConsumer: suspend (String) -> Unit
 	) {
 		kord.launch {
-			val pastesMessage = textFiles
-				.map {
-					async {
-						LOG.debug { "handleUpload (Message $messageId): Handling upload ${it.filename}" }
-						val filename = it.filename
-						val contents = FileHelper.getFileContents(kord, it)
-						val pasteUrl = createPaste(kord, filename, contents)
-						return@async filename to pasteUrl
-					}
-				}
-				.awaitAll()
+			val pastesMessage = textFiles.map { async { uploadFile(pasteSite, messageId, it) } }.awaitAll()
 				.joinToString("\n\n") { (filename, pasteUrl) -> "$filename\n$pasteUrl" }
 
 			pastesMessageConsumer(pastesMessage)
 			MESSAGE_LOCKS.remove(messageId)
 			LOG.debug { "handleUpload (Message $messageId): Replied to message:\n$pastesMessage" }
+		}
+	}
+
+	private suspend fun uploadFile(
+		pasteSite: PasteSite,
+		messageId: ULong,
+		attachment: Attachment
+	): Pair<String, String> {
+		val filename = attachment.filename
+		return try {
+			LOG.debug { "handleUpload (Message $messageId): Handling upload $filename to ${pasteSite.siteName}" }
+			val contents = FileHelper.getFileContents(kord, attachment)
+			val pasteUrl = pasteSite.service.create(filename, contents)
+			filename to pasteUrl
+		} catch (e: Throwable) {
+			LOG.error(e) { "handleUpload (Message $messageId): Failed to upload $filename to ${pasteSite.siteName}" }
+			filename to "${e::class.simpleName}: ${e.message}"
 		}
 	}
 
@@ -299,7 +322,4 @@ object PasteExtension : Extension() {
 
 	private fun Collection<Attachment>.toLogString(): String =
 		this.joinToString { "'${it.filename}' [${it.contentType}]" }
-
-	private suspend fun createPaste(kord: Kord, filename: String, contents: String): String =
-		PastebinService.createPaste(kord.resources.httpClient, filename, contents)
 }

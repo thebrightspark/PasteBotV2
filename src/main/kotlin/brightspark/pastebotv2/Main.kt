@@ -2,6 +2,7 @@ package brightspark.pastebotv2
 
 import brightspark.pastebotv2.extension.GeneralExtension
 import brightspark.pastebotv2.extension.PasteExtension
+import brightspark.pastebotv2.extension.TestingExtension
 import brightspark.pastebotv2.util.EnvVars
 import com.kotlindiscord.kord.extensions.ExtensibleBot
 import dev.kord.gateway.Intent
@@ -18,6 +19,8 @@ suspend fun main() {
 		extensions {
 			add { GeneralExtension }
 			add { PasteExtension }
+			if (EnvVars.TESTING)
+				add { TestingExtension }
 		}
 		// Keeping this here just in-case I need to debug Pastebin requests
 //		kord {
